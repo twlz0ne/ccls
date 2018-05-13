@@ -116,43 +116,6 @@ std::optional<std::string> RealPathNotExpandSymlink(std::string path) {
 
 void PlatformInit() {}
 
-#ifdef __APPLE__
-extern "C" int _NSGetExecutablePath(char* buf, uint32_t* bufsize);
-#endif
-
-// See
-// https://stackoverflow.com/questions/143174/how-do-i-get-the-directory-that-a-program-is-running-from
-std::string GetExecutablePath() {
-#ifdef __APPLE__
-  uint32_t size = 0;
-  _NSGetExecutablePath(nullptr, &size);
-  char* buffer = new char[size];
-  _NSGetExecutablePath(buffer, &size);
-  char* resolved = realpath(buffer, nullptr);
-  std::string result(resolved);
-  delete[] buffer;
-  free(resolved);
-  return result;
-#elif defined(__FreeBSD__)
-  static const int name[] = {
-      CTL_KERN,
-      KERN_PROC,
-      KERN_PROC_PATHNAME,
-      -1,
-  };
-  char path[MAXPATHLEN];
-  size_t len = sizeof(path);
-  path[0] = '\0';
-  (void)sysctl(name, 4, path, &len, NULL, 0);
-  return std::string(path);
-#else
-  char buffer[PATH_MAX] = {0};
-  if (-1 == readlink("/proc/self/exe", buffer, PATH_MAX))
-    return "";
-  return buffer;
-#endif
-}
-
 std::string NormalizePath(const std::string& path) {
   std::optional<std::string> resolved = RealPathNotExpandSymlink(path);
   return resolved ? *resolved : path;

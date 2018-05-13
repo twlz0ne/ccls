@@ -22,6 +22,11 @@
 #include "timer.h"
 #include "working_files.h"
 
+#include <llvm/Support/CommandLine.h>
+#include <llvm/Support/Process.h>
+using namespace llvm;
+using namespace llvm::cl;
+
 #include <doctest/doctest.h>
 #include <rapidjson/error/en.h>
 #include <loguru.hpp>
@@ -38,31 +43,17 @@
 std::string g_init_options;
 
 namespace {
+opt<bool> opt_help("h", desc("Alias for -help"));
+opt<bool> opt_version("v", desc("Alias for -version"));
+opt<bool> opt_test_index("test-index", desc("run index tests"));
+opt<bool> opt_test_unit("test-unit", desc("run unit tests"));
 
-std::unordered_map<std::string, std::string> ParseOptions(int argc,
-                                                          char** argv) {
-  std::unordered_map<std::string, std::string> output;
-
-  for (int i = 1; i < argc; ++i) {
-    std::string arg = argv[i];
-    if (arg[0] == '-') {
-      auto equal = arg.find('=');
-      if (equal != std::string::npos) {
-        output[arg.substr(0, equal)] = arg.substr(equal + 1);
-      } else if (i + 1 < argc && argv[i + 1][0] != '-')
-        output[arg] = argv[++i];
-      else
-        output[arg] = "";
-    }
-  }
-
-  return output;
+opt<std::string> opt_init("init", desc("extra initialization options"));
+opt<std::string> opt_log_file("log-file", desc("log"), value_desc("filename"));
+opt<std::string> opt_log_file_append("log-file-append", desc("log"), value_desc("filename"));
 }
 
-bool HasOption(const std::unordered_map<std::string, std::string>& options,
-               const std::string& option) {
-  return options.find(option) != options.end();
-}
+namespace {
 
 // This function returns true if e2e timing should be displayed for the given
 // MethodId.
@@ -313,19 +304,16 @@ void LanguageServerMain(const std::string& bin_name,
 int main(int argc, char** argv) {
   TraceMe();
 
-  std::unordered_map<std::string, std::string> options =
-      ParseOptions(argc, argv);
+  ParseCommandLineOptions(argc, argv, "C/C++/Objective-C language server\n\n");
 
-  if (HasOption(options, "-h") || HasOption(options, "--help")) {
+  if (opt_help) {
     PrintHelp();
     // Also emit doctest help if --test-unit is passed.
-    if (!HasOption(options, "--test-unit"))
+    if (!opt_test_unit)
       return 0;
   }
 
-  if (!HasOption(options, "--log-all-to-stderr"))
-    loguru::g_stderr_verbosity = loguru::Verbosity_WARNING;
-
+  loguru::g_stderr_verbosity = loguru::Verbosity_WARNING;
   loguru::g_preamble_date = false;
   loguru::g_preamble_time = false;
   loguru::g_preamble_verbose = false;
@@ -340,16 +328,13 @@ int main(int argc, char** argv) {
 
   bool language_server = true;
 
-  if (HasOption(options, "--log-file")) {
-    loguru::add_file(options["--log-file"].c_str(), loguru::Truncate,
+  if (opt_log_file.size())
+    loguru::add_file(opt_log_file.c_str(), loguru::Truncate, loguru::Verbosity_MAX);
+  if (opt_log_file_append.size())
+    loguru::add_file(opt_log_file_append.c_str(), loguru::Append,
                      loguru::Verbosity_MAX);
-  }
-  if (HasOption(options, "--log-file-append")) {
-    loguru::add_file(options["--log-file-append"].c_str(), loguru::Append,
-                     loguru::Verbosity_MAX);
-  }
 
-  if (HasOption(options, "--test-unit")) {
+  if (opt_test_unit) {
     language_server = false;
     doctest::Context context;
     context.applyCommandLine(argc, argv);
@@ -358,17 +343,17 @@ int main(int argc, char** argv) {
       return res;
   }
 
-  if (HasOption(options, "--test-index")) {
+  if (opt_test_index) {
     language_server = false;
-    if (!RunIndexTests(options["--test-index"], !HasOption(options, "--ci")))
+    if (!RunIndexTests("", sys::Process::StandardInIsUserInput()))
       return 1;
   }
 
   if (language_server) {
-    if (HasOption(options, "--init")) {
+    if (!opt_init.empty()) {
       // We check syntax error here but override client-side
       // initializationOptions in messages/initialize.cc
-      g_init_options = options["--init"];
+      g_init_options = opt_init;
       rapidjson::Document reader;
       rapidjson::ParseResult ok = reader.Parse(g_init_options.c_str());
       if (!ok) {
